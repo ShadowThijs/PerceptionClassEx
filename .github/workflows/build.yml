@@ -1,0 +1,67 @@
+name: Build and Release ReClassDark
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.3
+      with:
+        vs-version: 'latest'
+
+    - name: Build x64 Release
+      run: msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64
+
+    - name: Build Win32 Release
+      run: msbuild ReClass.sln /p:Configuration=Release /p:Platform=Win32
+
+    - name: Prepare Artifacts
+      run: |
+        mkdir artifacts
+        copy BIN\ReClassEx64.exe artifacts\ReClassEx64.exe
+        copy BIN\ReClassEx.exe artifacts\ReClassEx.exe
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ReClassDark-Binaries
+        path: artifacts\*.exe
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Download Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: ReClassDark-Binaries
+        path: ./release
+
+    - name: Get current date
+      id: date
+      run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: release-${{ env.date }}
+        name: "release-${{ env.date }}"
+        body: ""
+        draft: false
+        prerelease: false
+        files: ./release/*.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
