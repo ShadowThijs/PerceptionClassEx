@@ -302,10 +302,10 @@ bool SendWebSocketCommand(const std::string& json,
     std::string& response,
     int timeoutMs)
 {
-
+#ifdef PROFILE_CMD_SEND
     // instrumentation to monitor performance
     LARGE_INTEGER freq, t0, t1; QueryPerformanceFrequency(&freq); QueryPerformanceCounter(&t0);
-
+#endif
 
     response.clear();
 
@@ -387,12 +387,14 @@ bool SendWebSocketCommand(const std::string& json,
 
     }
 
+#ifdef PROFILE_CMD_SEND
     // output insrumentation
     QueryPerformanceCounter(&t1);
     double ms = double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(freq.QuadPart);
     wchar_t buf[256];
     swprintf_s(buf, L"[WSMem] SendWebSocketCommand took %.2f ms\n", ms);
     ReClassPrintConsole(buf);
+#endif
 
     return result;
 }
