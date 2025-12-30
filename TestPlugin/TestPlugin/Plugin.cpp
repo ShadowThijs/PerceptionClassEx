@@ -49,7 +49,6 @@ HANDLE PLUGIN_CC MyOpenProcess(IN DWORD dwDesiredAccess, IN BOOL bInheritHandle,
         std::lock_guard<std::mutex> lock(g_jobs_mutex);
         g_jobs.push(std::move(job));
     }
-    g_jobs_cv.notify_one();
 
     // two will represent that we "actually" attached
     return (HANDLE)dwProcessId;
@@ -87,7 +86,6 @@ BOOL PLUGIN_CC MyCloseProcess(HANDLE)
         std::lock_guard<std::mutex> lock(g_jobs_mutex);
         g_jobs.push(std::move(job));
     }
-    g_jobs_cv.notify_one();
     return TRUE;
 }
 
@@ -389,7 +387,6 @@ PLUGIN_CC ReadCallback(
             std::lock_guard<std::mutex> lock(g_jobs_mutex);
             g_jobs.push(std::move(job));
         }
-        g_jobs_cv.notify_one();
     }
 
     ZeroMemory(Buffer, Size);
@@ -429,7 +426,6 @@ WriteCallback(
             std::lock_guard<std::mutex> lock(g_jobs_mutex);
             g_jobs.push(std::move(job));
         }
-        g_jobs_cv.notify_one();
     }
 
     if (BytesWritten) *BytesWritten = Size;

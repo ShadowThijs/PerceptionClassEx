@@ -41,7 +41,6 @@ struct Job {
 
 extern std::queue<Job> g_jobs;
 extern std::mutex g_jobs_mutex;
-extern std::condition_variable g_jobs_cv;
 
 extern std::atomic<bool> g_workerRunning;
 extern std::thread* g_workerThread;
