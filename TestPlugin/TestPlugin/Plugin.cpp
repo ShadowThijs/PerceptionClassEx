@@ -19,10 +19,10 @@ std::wstring GetProcessNameFromPid(DWORD dwProcessId);
 
 
 // we replace "real" handles here with a psudohandle
-// 1 representing that the process exists and 2 meaning that we "attached" to it
-// currently the process list is enumerated locally so we can just return 1 for probes
+// returns the pid as a psudohandle
 HANDLE PLUGIN_CC MyOpenProcess(IN DWORD dwDesiredAccess, IN BOOL bInheritHandle, IN DWORD dwProcessId)
 {
+	if (dwProcessId == 0) return NULL;
     // Log for debugging
     LOGV(L"MyOpenProcess called for pid %u, access 0x%08X",dwProcessId, dwDesiredAccess);
 
@@ -37,7 +37,7 @@ HANDLE PLUGIN_CC MyOpenProcess(IN DWORD dwDesiredAccess, IN BOOL bInheritHandle,
 		// todo: maybe verify that the process actually exists?
 		// not needed until we replace process iteration with a remote request
 
-        return (HANDLE)1;
+        return (HANDLE)dwProcessId;
     }
 
     // Real attach request
@@ -52,28 +52,30 @@ HANDLE PLUGIN_CC MyOpenProcess(IN DWORD dwDesiredAccess, IN BOOL bInheritHandle,
     g_jobs_cv.notify_one();
 
     // two will represent that we "actually" attached
-    return (HANDLE)2;
+    return (HANDLE)dwProcessId;
 }
 
-HANDLE MyOpenThread(IN DWORD dwDesiredAccess, IN BOOL bInheritHandle, IN DWORD dwThreadId) {
+// simply returns the handle as the thread id at the moment
+HANDLE PLUGIN_CC MyOpenThread(IN DWORD dwDesiredAccess, IN BOOL bInheritHandle, IN DWORD dwThreadId) {
+	if (dwThreadId == 0) return NULL;
     // Log for debugging
     LOGV(L"MyOpenThread called for pid %u, access 0x%08X",dwProcessId, dwDesiredAccess);
 
-    // Detect process browser enumeration
-    bool isProbe =
-        (dwDesiredAccess == (PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)) ||
-        (dwDesiredAccess == PROCESS_QUERY_LIMITED_INFORMATION);
+    //// Detect process browser enumeration
+    //bool isProbe =
+    //    (dwDesiredAccess == (PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)) ||
+    //    (dwDesiredAccess == PROCESS_QUERY_LIMITED_INFORMATION);
 
-    if (isProbe) {
-        // Return a fake handle but DO NOT enqueue a job
-        return (HANDLE)1;
-    }
+    //if (isProbe) {
+    //    // Return a fake handle but DO NOT enqueue a job
+    //    return (HANDLE)dwThreadId;
+    //}
 
 	// Real attach request
 	// todo: decide if I wanna keep track of some kind of identifiers mapped to real handles on the server or just return fake handles always
 
     // for now we just return 1
-    return (HANDLE)1;
+    return (HANDLE)dwThreadId;
 }
 
 
