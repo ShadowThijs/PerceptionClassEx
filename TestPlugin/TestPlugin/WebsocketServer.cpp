@@ -43,6 +43,9 @@ struct ClientState {
     bool waiting_for_response = false;
     //bool needs_write = false;
     std::condition_variable cv;
+
+    // for accumulating split message buffers
+    std::string recv_buffer;
 };
 
 static std::map<struct lws*, std::shared_ptr<ClientState>> g_clients;
@@ -94,6 +97,11 @@ static int callback_ws(struct lws* wsi,
 
         if (state) {
             std::unique_lock<std::mutex> lock(state->mtx);
+
+            // clear the recv buffer for the next message
+            state->recv_buffer.clear();
+            
+
             // If someone is waiting on this client, wake them with empty response
             if (state->waiting_for_response) {
                 state->waiting_for_response = false;
@@ -118,11 +126,19 @@ static int callback_ws(struct lws* wsi,
 
         if (state) {
             std::unique_lock<std::mutex> lock(state->mtx);
-            state->last_response.assign(static_cast<const char*>(in), len);
 
-            if (state->waiting_for_response) {
-                state->waiting_for_response = false;
-                state->cv.notify_all();
+            // Append this fragment to the buffer
+            state->recv_buffer.append(static_cast<const char*>(in), len);
+
+            // Only when the final fragment arrives do we treat it as a full message
+            if (lws_is_final_fragment(wsi)) {
+                state->last_response.swap(state->recv_buffer); // move buffer into last_response
+                state->recv_buffer.clear();
+
+                if (state->waiting_for_response) {
+                    state->waiting_for_response = false;
+                    state->cv.notify_all();
+                }
             }
         }
 

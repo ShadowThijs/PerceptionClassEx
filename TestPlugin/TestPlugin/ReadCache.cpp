@@ -11,6 +11,8 @@ std::condition_variable        g_jobs_cv;
 std::atomic<bool> g_workerRunning{ false };
 std::thread* g_workerThread = nullptr;
 
+static inline void ClearCache() {{std::unique_lock<std::shared_mutex> lock(g_cache_mutex);g_cache.clear();}};
+
 void worker_thread()
 {
     LOG("STARTING WORKER THREAD");
@@ -61,6 +63,8 @@ void worker_thread()
             const uintptr_t req_addr = job.read.address;
             const size_t    req_size = job.read.size;
 
+
+
             char buf[128];
             snprintf(buf, sizeof(buf),
                 "{\"cmd\":\"read\",\"pid\":%u,\"address\":%llu,\"size\":%llu}",
@@ -72,17 +76,20 @@ void worker_thread()
             if (!SendWebSocketCommand(cmd, response, 200)) {
                 LOG(L"Read job failed: SendWebSocketCommand returned false (pid=%u, addr=0x%llX, size=%llu)",
                     job.pid, (unsigned long long)req_addr, (unsigned long long)req_size);
+                ClearCache();
                 break;
             }
             if (response.empty()) {
                 LOG(L"Read job failed: empty response (pid=%u, addr=0x%llX, size=%llu)",
                     job.pid, (unsigned long long)req_addr, (unsigned long long)req_size);
+                ClearCache();
                 break;
             }
 
             auto pos = response.find("\"data\":\"");
             if (pos == std::string::npos) {
                 LOG(L"Read job failed: no data field in response: %hs", response.c_str());
+                ClearCache();
                 break;
             }
 
