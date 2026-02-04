@@ -30,32 +30,37 @@ jobs:
         vcpkg install libwebsockets:x64-windows-static
         vcpkg install libwebsockets:x86-windows-static
         vcpkg integrate install
+      shell: pwsh
 
     - name: Setup Visual Studio components
       shell: pwsh
       run: |
-        # Note: MFC libraries should be installed via Visual Studio Installer
-        # The GitHub Actions runner typically includes MFC, but if issues occur,
-        # you may need to use a custom runner or VS Build Tools installer
         Write-Host "Using pre-installed Visual Studio with MFC libraries"
 
     - name: Build x64 Release
-      run: msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgTriplet=x64-windows-static
+      run: |
+        msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\x64-windows-static\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\"
+      shell: pwsh
 
     - name: Build Win32 Release
-      run: msbuild ReClass.sln /p:Configuration=Release /p:Platform=Win32 /p:VcpkgTriplet=x86-windows-static
+      run: |
+        msbuild ReClass.sln /p:Configuration=Release /p:Platform=Win32 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x86-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\x86-windows-static\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\"
+      shell: pwsh
 
     - name: Prepare Artifacts
       run: |
         mkdir artifacts
-        copy BIN\ReClassEx64.exe artifacts\ReClassEx64.exe
-        copy BIN\ReClassEx.exe artifacts\ReClassEx.exe
+        copy BIN\nothingtoseehere64.exe artifacts\ReClassEx64.exe
+        copy BIN\nothingtoseehere.exe artifacts\ReClassEx.exe
+        if (Test-Path "BIN\plugins\TestPlugin64.dll") { copy BIN\plugins\TestPlugin64.dll artifacts\ }
+        if (Test-Path "BIN\plugins\TestPlugin.dll") { copy BIN\plugins\TestPlugin.dll artifacts\ }
+      shell: pwsh
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: PerceptClassEx-Binaries
-        path: artifacts\*.exe
+        path: artifacts\*
 
   release:
     needs: build
@@ -87,6 +92,6 @@ jobs:
           - libwebsockets (vcpkg)
         draft: false
         prerelease: false
-        files: ./release/*.exe
+        files: ./release/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
