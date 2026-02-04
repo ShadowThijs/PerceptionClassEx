@@ -22,22 +22,25 @@ jobs:
       with:
         msbuild-architecture: x64
 
-    - name: Setup vcpkg
-      uses: lukka/run-vcpkg@v11
+    - name: Setup vcpkg (latest)
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+      shell: pwsh
 
     - name: Install libwebsockets
       run: |
-        vcpkg install libwebsockets:x64-windows-static --recurse
-        vcpkg integrate install
+        .\vcpkg\vcpkg install libwebsockets:x64-windows-static --recurse
+        .\vcpkg\vcpkg integrate install
       shell: pwsh
       continue-on-error: false
 
     - name: Verify vcpkg installation
       run: |
         Write-Host "Checking vcpkg installation..."
-        Get-ChildItem "${{ github.workspace }}\vcpkg\installed\x64-windows-static\include" -Recurse -Filter "libwebsockets.h" -ErrorAction SilentlyContinue
+        Get-ChildItem "vcpkg\installed\x64-windows-static\include" -Recurse -Filter "libwebsockets.h" -ErrorAction SilentlyContinue
         Write-Host "`nChecking lib directory..."
-        Get-ChildItem "${{ github.workspace }}\vcpkg\installed\x64-windows-static\lib" -Filter "*.lib" | Select-Object Name
+        Get-ChildItem "vcpkg\installed\x64-windows-static\lib" -Filter "*.lib" | Select-Object Name
       shell: pwsh
 
     - name: Build x64 Release (Main executable only)
