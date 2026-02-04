@@ -14,6 +14,8 @@ jobs:
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
+      with:
+        submodules: false
 
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
@@ -23,37 +25,44 @@ jobs:
     - name: Setup vcpkg
       uses: lukka/run-vcpkg@v11
       with:
-        vcpkgGitCommitId: 'a42af01b72c28a8e1d7b48107b33e4f286a55ef6'
+        vcpkgGitCommitId: '01f602195983451bc83e72f4214af2cbc495aa94'
 
-    - name: Install libwebsockets
+    - name: Install libwebsockets with binary caching
       run: |
-        vcpkg install libwebsockets:x64-windows-static
-        vcpkg install libwebsockets:x86-windows-static
+        $env:VCPKG_BINARY_SOURCES = "clear;x-gha,readwrite"
+        vcpkg install libwebsockets:x64-windows-static --clean-after-build
+        vcpkg install libwebsockets:x86-windows-static --clean-after-build
         vcpkg integrate install
       shell: pwsh
-
-    - name: Setup Visual Studio components
-      shell: pwsh
-      run: |
-        Write-Host "Using pre-installed Visual Studio with MFC libraries"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build x64 Release
       run: |
-        msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\"
+        msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\" /m
       shell: pwsh
 
     - name: Build Win32 Release
       run: |
-        msbuild ReClass.sln /p:Configuration=Release /p:Platform=Win32 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x86-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\"
+        msbuild ReClass.sln /p:Configuration=Release /p:Platform=Win32 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x86-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\" /m
       shell: pwsh
 
     - name: Prepare Artifacts
       run: |
-        mkdir artifacts
-        copy BIN\nothingtoseehere64.exe artifacts\ReClassEx64.exe
-        copy BIN\nothingtoseehere.exe artifacts\ReClassEx.exe
-        if (Test-Path "BIN\plugins\TestPlugin64.dll") { copy BIN\plugins\TestPlugin64.dll artifacts\ }
-        if (Test-Path "BIN\plugins\TestPlugin.dll") { copy BIN\plugins\TestPlugin.dll artifacts\ }
+        New-Item -ItemType Directory -Force -Path artifacts
+        if (Test-Path "BIN\nothingtoseehere64.exe") { 
+          Copy-Item "BIN\nothingtoseehere64.exe" "artifacts\ReClassEx64.exe" 
+        }
+        if (Test-Path "BIN\nothingtoseehere.exe") { 
+          Copy-Item "BIN\nothingtoseehere.exe" "artifacts\ReClassEx.exe" 
+        }
+        if (Test-Path "BIN\plugins\TestPlugin64.dll") { 
+          Copy-Item "BIN\plugins\TestPlugin64.dll" "artifacts\" 
+        }
+        if (Test-Path "BIN\plugins\TestPlugin.dll") { 
+          Copy-Item "BIN\plugins\TestPlugin.dll" "artifacts\" 
+        }
+        Get-ChildItem -Path artifacts
       shell: pwsh
 
     - name: Upload Artifacts
@@ -61,11 +70,12 @@ jobs:
       with:
         name: PerceptClassEx-Binaries
         path: artifacts\*
+        if-no-files-found: warn
 
   release:
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     
     steps:
     - name: Download Artifacts
@@ -76,7 +86,7 @@ jobs:
 
     - name: Get current date
       id: date
-      run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+      run: echo "date=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
@@ -90,6 +100,12 @@ jobs:
           - Visual Studio 2022 (v143 toolset)
           - MFC Libraries (14.44)
           - libwebsockets (vcpkg)
+          
+          **Files:**
+          - ReClassEx64.exe - 64-bit executable
+          - ReClassEx.exe - 32-bit executable
+          - TestPlugin64.dll - 64-bit plugin (if built)
+          - TestPlugin.dll - 32-bit plugin (if built)
         draft: false
         prerelease: false
         files: ./release/*
