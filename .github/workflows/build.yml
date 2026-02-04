@@ -39,12 +39,12 @@ jobs:
 
     - name: Build x64 Release
       run: |
-        msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\x64-windows-static\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\"
+        msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\"
       shell: pwsh
 
     - name: Build Win32 Release
       run: |
-        msbuild ReClass.sln /p:Configuration=Release /p:Platform=Win32 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x86-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\x86-windows-static\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\"
+        msbuild ReClass.sln /p:Configuration=Release /p:Platform=Win32 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x86-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\"
       shell: pwsh
 
     - name: Prepare Artifacts
