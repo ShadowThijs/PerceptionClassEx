@@ -22,15 +22,17 @@ jobs:
       with:
         msbuild-architecture: x64
 
-    - name: Check repository structure
+    - name: Check scintilla structure
       run: |
-        Write-Host "Repository structure:"
-        Get-ChildItem -Path . -Directory | Select-Object Name
-        Write-Host "`nChecking for scintilla:"
+        Write-Host "Checking scintilla directory contents:"
         if (Test-Path "scintilla") {
-          Get-ChildItem -Path scintilla -Recurse -Filter "SciLexer.h" | Select-Object FullName
-        } else {
-          Write-Host "Scintilla directory not found!"
+          Get-ChildItem -Path scintilla -Directory | Select-Object Name
+          Write-Host "`nLooking for SciLexer.h:"
+          Get-ChildItem -Path scintilla -Recurse -Filter "SciLexer.h" -ErrorAction SilentlyContinue | Select-Object FullName
+          Write-Host "`nLooking for include directory:"
+          if (Test-Path "scintilla\include") {
+            Get-ChildItem -Path scintilla\include -Filter "*.h" | Select-Object Name
+          }
         }
       shell: pwsh
 
@@ -45,26 +47,28 @@ jobs:
         .\vcpkg\vcpkg install libwebsockets:x64-windows-static --recurse
         .\vcpkg\vcpkg integrate install
       shell: pwsh
-      continue-on-error: false
 
-    - name: Verify vcpkg installation
+    - name: Build Scintilla (if needed)
       run: |
-        Write-Host "Checking vcpkg installation..."
-        Get-ChildItem "vcpkg\installed\x64-windows-static\include" -Recurse -Filter "libwebsockets.h" -ErrorAction SilentlyContinue
-        Write-Host "`nChecking lib directory..."
-        Get-ChildItem "vcpkg\installed\x64-windows-static\lib" -Filter "*.lib" | Select-Object Name
-      shell: pwsh
-
-    - name: Build x64 Release (Main executable only)
-      run: |
-        msbuild ReClass\ReClassEx.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\" /m /v:minimal
-      shell: pwsh
-
-    - name: Build x64 Release Plugin
-      run: |
-        msbuild TestPlugin\TestPlugin\TestPlugin.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\" /m /v:detailed
+        if (Test-Path "scintilla\win32") {
+          Write-Host "Building Scintilla..."
+          Push-Location scintilla\win32
+          if (Test-Path "SciLexer.vcxproj") {
+            msbuild SciLexer.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+          } elseif (Test-Path "scintilla.mak") {
+            nmake -f scintilla.mak
+          } else {
+            Write-Host "No build file found for Scintilla"
+          }
+          Pop-Location
+        }
       shell: pwsh
       continue-on-error: true
+
+    - name: Build x64 Release (Solution)
+      run: |
+        msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\" /m /v:minimal
+      shell: pwsh
 
     - name: Check build outputs
       run: |
@@ -73,6 +77,11 @@ jobs:
           Get-ChildItem -Path BIN -Recurse | Select-Object FullName, Length
         } else {
           Write-Host "BIN directory not found!"
+        }
+        
+        Write-Host "`nChecking bin\plugins directory..."
+        if (Test-Path "bin\plugins") {
+          Get-ChildItem -Path bin\plugins -Recurse | Select-Object FullName, Length
         }
       shell: pwsh
 
@@ -90,12 +99,19 @@ jobs:
         if (Test-Path "BIN\plugins\TestPlugin64.dll") { 
           Copy-Item "BIN\plugins\TestPlugin64.dll" "artifacts\"
           Write-Host "✓ Copied TestPlugin64.dll"
+        } elseif (Test-Path "bin\plugins\TestPlugin64.dll") {
+          Copy-Item "bin\plugins\TestPlugin64.dll" "artifacts\"
+          Write-Host "✓ Copied TestPlugin64.dll (from bin\plugins)"
         } else {
           Write-Host "✗ TestPlugin64.dll not found"
         }
         
         Write-Host "`nArtifacts prepared:"
-        Get-ChildItem -Path artifacts
+        if (Test-Path "artifacts") {
+          Get-ChildItem -Path artifacts
+        } else {
+          Write-Host "No artifacts!"
+        }
       shell: pwsh
 
     - name: Upload Artifacts
