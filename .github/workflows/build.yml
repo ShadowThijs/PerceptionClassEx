@@ -12,7 +12,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout repo
+    - name: Checkout repository
       uses: actions/checkout@v4
       with:
         submodules: recursive
@@ -22,207 +22,178 @@ jobs:
       with:
         msbuild-architecture: x64
 
-    - name: Check scintilla structure
+    - name: Setup latest vcpkg
       run: |
-        Write-Host "Checking scintilla directory contents:"
-        if (Test-Path "scintilla") {
-          Get-ChildItem -Path scintilla -Directory | Select-Object Name
-          Write-Host "`nLooking for SciLexer.h:"
-          Get-ChildItem -Path scintilla -Recurse -Filter "SciLexer.h" -ErrorAction SilentlyContinue | Select-Object FullName
-          Write-Host "`nLooking for include directory:"
-          if (Test-Path "scintilla\include") {
-            Get-ChildItem -Path scintilla\include -Filter "*.h" | Select-Object Name
-          }
-        }
-      shell: pwsh
-
-    - name: Setup vcpkg (latest)
-      run: |
-        git clone https://github.com/microsoft/vcpkg.git
+        git clone --depth 1 https://github.com/microsoft/vcpkg.git vcpkg
         .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
       shell: pwsh
 
-    - name: Install libwebsockets
+    - name: Install dependencies via vcpkg
       run: |
-        .\vcpkg\vcpkg install libwebsockets:x64-windows-static --recurse
-        .\vcpkg\vcpkg integrate install
+        .\vcpkg\vcpkg install libwebsockets:x64-windows-static --clean-after-build
+        # Optional: add more packages here, e.g.
+        # .\vcpkg\vcpkg install zlib:x64-windows-static cpprestsdk:x64-windows-static
       shell: pwsh
 
-    - name: Build Scintilla (if needed)
+    - name: Set VCPKG_ROOT environment variable
+      run: echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" >> $GITHUB_ENV
+      shell: pwsh
+
+    # Optional: only if your .vcxproj / .sln does NOT already have vcpkg integration
+    # Many older MFC/ReClass-style projects need this line:
+    - name: Integrate vcpkg (classic way - safe fallback)
+      run: .\vcpkg\vcpkg integrate project
+      shell: pwsh
+      continue-on-error: true   # often not needed anymore → ignore failure
+
+    - name: Debug – Show vcpkg triplet path
+      run: |
+        Write-Host "VCPKG_ROOT = $env:VCPKG_ROOT"
+        if (Test-Path "$env:VCPKG_ROOT\installed\x64-windows-static") {
+          Get-ChildItem "$env:VCPKG_ROOT\installed\x64-windows-static" -Directory | Select-Object Name
+        }
+      shell: pwsh
+
+    - name: Build Scintilla (if present)
       run: |
         if (Test-Path "scintilla\win32") {
           Write-Host "Building Scintilla..."
           Push-Location scintilla\win32
           if (Test-Path "SciLexer.vcxproj") {
-            msbuild SciLexer.vcxproj /p:Configuration=Release /p:Platform=x64 /m
-          } elseif (Test-Path "scintilla.mak") {
+            msbuild SciLexer.vcxproj /p:Configuration=Release /p:Platform=x64 /m /v:minimal
+          }
+          elseif (Test-Path "scintilla.mak") {
             nmake -f scintilla.mak
-          } else {
-            Write-Host "No build file found for Scintilla"
+          }
+          else {
+            Write-Host "No known Scintilla build file found"
           }
           Pop-Location
         }
       shell: pwsh
       continue-on-error: true
 
-    - name: Build x64 Release (Solution)
+    - name: Build main solution (x64 Release)
       run: |
-        msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\" /m /v:minimal
+        msbuild ReClass.sln `
+          /p:Configuration=Release `
+          /p:Platform=x64 `
+          /m `
+          /v:minimal `
+          /p:VcpkgEnabled=true   # keep only if your project explicitly requires it
       shell: pwsh
 
-    - name: Check build outputs
+    - name: Check build outputs (debug)
       run: |
-        Write-Host "Checking BIN directory..."
-        if (Test-Path "BIN") {
-          Get-ChildItem -Path BIN -Recurse | Select-Object FullName, Length
-        } else {
-          Write-Host "BIN directory not found!"
-        }
-        
-        Write-Host "`nChecking bin\plugins directory..."
-        if (Test-Path "bin\plugins") {
-          Get-ChildItem -Path bin\plugins -Recurse | Select-Object FullName, Length
-        }
+        Get-ChildItem -Path BIN -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length
+        Get-ChildItem -Path bin  -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length
       shell: pwsh
+      continue-on-error: true
 
-    - name: Prepare Artifacts
+    - name: Prepare artifacts
       run: |
-        New-Item -ItemType Directory -Force -Path artifacts
-        New-Item -ItemType Directory -Force -Path "artifacts\plugins"
-        
-        $mainExeBuilt = $false
-        $pluginBuilt = $false
-        
-        # Copy main executable
-        if (Test-Path "BIN\nothingtoseehere64.exe") { 
-          Copy-Item "BIN\nothingtoseehere64.exe" "artifacts\ReClassEx64.exe"
-          Write-Host "✓ Copied ReClassEx64.exe"
-          $mainExeBuilt = $true
+        New-Item -ItemType Directory -Force -Path artifacts\plugins
+
+        # Main exe – adjust name if different in your project
+        $exePath = "BIN\nothingtoseehere64.exe"
+        if (Test-Path $exePath) {
+          Copy-Item $exePath "artifacts\ReClassEx64.exe" -Force
+          Write-Host "Copied main executable"
         } else {
-          Write-Host "✗ Main executable not found!"
+          Write-Error "Main executable not found: $exePath"
           exit 1
         }
-        
-        # Copy plugin - check multiple possible names
-        $pluginFound = $false
-        $pluginPaths = @(
-          @{Source="BIN\plugins\TestPlugin.rc-plugin64"; Name="TestPlugin.rc-plugin64"},
-          @{Source="bin\plugins\TestPlugin.rc-plugin64"; Name="TestPlugin.rc-plugin64"}
-        )
-        
-        foreach ($plugin in $pluginPaths) {
-          if (Test-Path $plugin.Source) {
-            # Copy to both root (for individual download) and plugins folder (for proper structure)
-            Copy-Item $plugin.Source "artifacts\$($plugin.Name)"
-            Copy-Item $plugin.Source "artifacts\plugins\$($plugin.Name)"
-            Write-Host "✓ Copied plugin: $($plugin.Name)"
-            $pluginBuilt = $true
-            break
+
+        # Plugin(s) – extend patterns as needed
+        $pluginPatterns = @("BIN\plugins\*.rc-plugin64", "bin\plugins\*.rc-plugin64", "BIN\plugins\*.dll")
+        $pluginCopied = $false
+
+        foreach ($pattern in $pluginPatterns) {
+          Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue | ForEach-Object {
+            $destRoot   = "artifacts\$($_.Name)"
+            $destPlugin = "artifacts\plugins\$($_.Name)"
+            Copy-Item $_.FullName $destRoot   -Force
+            Copy-Item $_.FullName $destPlugin -Force
+            Write-Host "Copied plugin: $($_.Name)"
+            $pluginCopied = $true
           }
         }
-        
-        if (-not $pluginBuilt) {
-          Write-Host "⚠ Warning: Plugin not found in expected locations"
+
+        if (-not $pluginCopied) {
+          Write-Warning "No plugins found – continuing anyway"
         }
-        
-        # Create a README for users
+
+        # README
         @"
-          # PerceptClassEx - Installation Instructions
-          
-          ## Files Included:
-          - ReClassEx64.exe - Main executable
-          - plugins/TestPlugin.rc-plugin64 - WebSocket plugin for perception.cx integration
-          
-          ## Installation:
-          1. Extract all files maintaining the folder structure
-          2. The 'plugins' folder must be in the same directory as ReClassEx64.exe
-          3. Run ReClassEx64.exe
-          4. Go to File -> Plugins to see available plugins
-          
-          ## Plugin Usage:
-          The TestPlugin provides WebSocket server functionality for IPC with perception.cx scripts.
-          "@ | Out-File -FilePath "artifacts\README.txt" -Encoding UTF8
-                  
-        Write-Host "`n=== Build Summary ==="
-        Write-Host "Main Executable: $(if($mainExeBuilt){'✓ Success'}else{'✗ Failed'})"
-        Write-Host "Plugin: $(if($pluginBuilt){'✓ Success'}else{'⚠ Not Found'})"
-        
-        Write-Host "`nArtifacts structure:"
-        Get-ChildItem -Path artifacts -Recurse | Select-Object FullName, Length
+        # PerceptClassEx – Automated Build
+
+        ## Included files
+        - ReClassEx64.exe
+        - plugins\*.rc-plugin64   (WebSocket / perception.cx integration)
+
+        ## Installation
+        1. Extract the zip preserving folder structure
+        2. Keep the `plugins` folder next to the .exe
+        3. Launch ReClassEx64.exe
+        4. Check File → Plugins menu
+
+        Built on: $(Get-Date -Format "yyyy-MM-dd HH:mm")
+        "@ | Out-File -FilePath "artifacts\README.txt" -Encoding utf8
       shell: pwsh
 
-    - name: Create ZIP package
+    - name: Create final ZIP
       run: |
-        $zipName = "PerceptClassEx-x64-Complete.zip"
-        Compress-Archive -Path "artifacts\ReClassEx64.exe", "artifacts\plugins", "artifacts\README.txt" -DestinationPath "artifacts\$zipName"
-        Write-Host "✓ Created $zipName with proper folder structure"
+        Compress-Archive `
+          -Path "artifacts\ReClassEx64.exe", "artifacts\plugins", "artifacts\README.txt" `
+          -DestinationPath "artifacts\PerceptClassEx-x64.zip" `
+          -Force
       shell: pwsh
 
-    - name: Upload Individual Artifacts
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: PerceptClassEx-Binaries-x64
-        path: |
-          artifacts\ReClassEx64.exe
-          artifacts\TestPlugin*.rc-plugin64
-          artifacts\TestPlugin*.dll
-          artifacts\README.txt
-
-    - name: Upload Complete Package
-      uses: actions/upload-artifact@v4
-      with:
-        name: PerceptClassEx-Complete-Package
-        path: artifacts\PerceptClassEx-x64-Complete.zip
-
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: PerceptClassEx-Binaries-x64
-        path: artifacts\*
-        if-no-files-found: warn
+        name: PerceptClassEx-x64
+        path: artifacts/
+        if-no-files-found: error
 
   release:
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-    
+
     steps:
-    - name: Download Artifacts
+    - name: Download artifact
       uses: actions/download-artifact@v4
       with:
-        name: PerceptClassEx-Complete-Package
-        path: ./release
+        name: PerceptClassEx-x64
+        path: release
 
-    - name: Get current date
-      id: date
-      run: echo "date=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
+    - name: Create timestamp for tag
+      id: timestamp
+      run: echo "tag=build-$(date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: release-${{ env.date }}
-        name: "Release ${{ env.date }}"
+        tag_name: ${{ steps.timestamp.outputs.tag }}
+        name: Build ${{ steps.timestamp.outputs.tag }}
         body: |
-          Automated build of PerceptClassEx (x64)
+          Automated x64 build of **PerceptClassEx**
           
-          Built with:
-          - Visual Studio 2022 (v143 toolset)
-          - MFC Libraries (14.44)
-          - libwebsockets (vcpkg)
+          **Date:** $(date +'%Y-%m-%d %H:%M UTC')
           
-          ## Installation:
-          1. Download `PerceptClassEx-x64-Complete.zip`
-          2. Extract maintaining folder structure
-          3. Run ReClassEx64.exe
-          4. Plugin will be available in File -> Plugins
+          **Included:**
+          - `ReClassEx64.exe`
+          - `plugins/` folder with WebSocket plugin(s)
           
-          ## Files:
-          - ReClassEx64.exe - Main executable
-          - plugins/TestPlugin.rc-plugin64 - WebSocket plugin
+          **Instructions:**
+          1. Download and extract `PerceptClassEx-x64.zip`
+          2. Keep the `plugins` folder beside the executable
+          3. Launch ReClassEx64.exe
+          
+          Built with Visual Studio 2022 + vcpkg (libwebsockets static)
+        files: release/*.zip
         draft: false
-        prerelease: false
-        files: ./release/*.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        prerelease: true          # ← change to false when stable
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
