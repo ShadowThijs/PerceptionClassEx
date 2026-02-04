@@ -1,4 +1,4 @@
-name: Build and Release ReClassDark
+name: Build and Release PerceptClassEx
 
 on:
   push:
@@ -18,13 +18,32 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v1.3
       with:
-        vs-version: 'latest'
+        vs-version: '2022'
+
+    - name: Setup vcpkg
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgGitCommitId: 'a42af01b72c28a8e1d7b48107b33e4f286a55ef6'
+
+    - name: Install libwebsockets
+      run: |
+        vcpkg install libwebsockets:x64-windows-static
+        vcpkg install libwebsockets:x86-windows-static
+        vcpkg integrate install
+
+    - name: Setup Visual Studio components
+      shell: pwsh
+      run: |
+        # Note: MFC libraries should be installed via Visual Studio Installer
+        # The GitHub Actions runner typically includes MFC, but if issues occur,
+        # you may need to use a custom runner or VS Build Tools installer
+        Write-Host "Using pre-installed Visual Studio with MFC libraries"
 
     - name: Build x64 Release
-      run: msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64
+      run: msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgTriplet=x64-windows-static
 
     - name: Build Win32 Release
-      run: msbuild ReClass.sln /p:Configuration=Release /p:Platform=Win32
+      run: msbuild ReClass.sln /p:Configuration=Release /p:Platform=Win32 /p:VcpkgTriplet=x86-windows-static
 
     - name: Prepare Artifacts
       run: |
@@ -35,7 +54,7 @@ jobs:
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ReClassDark-Binaries
+        name: PerceptClassEx-Binaries
         path: artifacts\*.exe
 
   release:
@@ -47,7 +66,7 @@ jobs:
     - name: Download Artifacts
       uses: actions/download-artifact@v4
       with:
-        name: ReClassDark-Binaries
+        name: PerceptClassEx-Binaries
         path: ./release
 
     - name: Get current date
@@ -58,8 +77,14 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: release-${{ env.date }}
-        name: "release-${{ env.date }}"
-        body: ""
+        name: "Release ${{ env.date }}"
+        body: |
+          Automated build of PerceptClassEx
+          
+          Built with:
+          - Visual Studio 2022 (v143 toolset)
+          - MFC Libraries (14.44)
+          - libwebsockets (vcpkg)
         draft: false
         prerelease: false
         files: ./release/*.exe
