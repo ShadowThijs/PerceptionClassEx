@@ -88,6 +88,7 @@ jobs:
     - name: Prepare Artifacts
       run: |
         New-Item -ItemType Directory -Force -Path artifacts
+        New-Item -ItemType Directory -Force -Path "artifacts\plugins"
         
         $mainExeBuilt = $false
         $pluginBuilt = $false
@@ -105,16 +106,16 @@ jobs:
         # Copy plugin - check multiple possible names
         $pluginFound = $false
         $pluginPaths = @(
-          @{Source="BIN\plugins\TestPlugin64.dll"; Dest="TestPlugin64.dll"},
-          @{Source="bin\plugins\TestPlugin64.dll"; Dest="TestPlugin64.dll"},
-          @{Source="BIN\plugins\TestPlugin.rc-plugin64"; Dest="TestPlugin64.dll"},
-          @{Source="bin\plugins\TestPlugin.rc-plugin64"; Dest="TestPlugin64.dll"}
+          @{Source="BIN\plugins\TestPlugin.rc-plugin64"; Name="TestPlugin.rc-plugin64"},
+          @{Source="bin\plugins\TestPlugin.rc-plugin64"; Name="TestPlugin.rc-plugin64"}
         )
         
         foreach ($plugin in $pluginPaths) {
           if (Test-Path $plugin.Source) {
-            Copy-Item $plugin.Source "artifacts\$($plugin.Dest)"
-            Write-Host "✓ Copied plugin from $($plugin.Source) to $($plugin.Dest)"
+            # Copy to both root (for individual download) and plugins folder (for proper structure)
+            Copy-Item $plugin.Source "artifacts\$($plugin.Name)"
+            Copy-Item $plugin.Source "artifacts\plugins\$($plugin.Name)"
+            Write-Host "✓ Copied plugin: $($plugin.Name)"
             $pluginBuilt = $true
             break
           }
@@ -124,13 +125,54 @@ jobs:
           Write-Host "⚠ Warning: Plugin not found in expected locations"
         }
         
+        # Create a README for users
+        @"
+          # PerceptClassEx - Installation Instructions
+          
+          ## Files Included:
+          - ReClassEx64.exe - Main executable
+          - plugins/TestPlugin.rc-plugin64 - WebSocket plugin for perception.cx integration
+          
+          ## Installation:
+          1. Extract all files maintaining the folder structure
+          2. The 'plugins' folder must be in the same directory as ReClassEx64.exe
+          3. Run ReClassEx64.exe
+          4. Go to File -> Plugins to see available plugins
+          
+          ## Plugin Usage:
+          The TestPlugin provides WebSocket server functionality for IPC with perception.cx scripts.
+          "@ | Out-File -FilePath "artifacts\README.txt" -Encoding UTF8
+                  
         Write-Host "`n=== Build Summary ==="
         Write-Host "Main Executable: $(if($mainExeBuilt){'✓ Success'}else{'✗ Failed'})"
         Write-Host "Plugin: $(if($pluginBuilt){'✓ Success'}else{'⚠ Not Found'})"
         
-        Write-Host "`nArtifacts:"
-        Get-ChildItem -Path artifacts | Format-Table Name, Length, LastWriteTime
+        Write-Host "`nArtifacts structure:"
+        Get-ChildItem -Path artifacts -Recurse | Select-Object FullName, Length
       shell: pwsh
+
+    - name: Create ZIP package
+      run: |
+        $zipName = "PerceptClassEx-x64-Complete.zip"
+        Compress-Archive -Path "artifacts\ReClassEx64.exe", "artifacts\plugins", "artifacts\README.txt" -DestinationPath "artifacts\$zipName"
+        Write-Host "✓ Created $zipName with proper folder structure"
+      shell: pwsh
+
+    - name: Upload Individual Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: PerceptClassEx-Binaries-x64
+        path: |
+          artifacts\ReClassEx64.exe
+          artifacts\TestPlugin*.rc-plugin64
+          artifacts\TestPlugin*.dll
+          artifacts\README.txt
+
+    - name: Upload Complete Package
+      uses: actions/upload-artifact@v4
+      with:
+        name: PerceptClassEx-Complete-Package
+        path: artifacts\PerceptClassEx-x64-Complete.zip
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
@@ -148,7 +190,7 @@ jobs:
     - name: Download Artifacts
       uses: actions/download-artifact@v4
       with:
-        name: PerceptClassEx-Binaries-x64
+        name: PerceptClassEx-Complete-Package
         path: ./release
 
     - name: Get current date
@@ -161,18 +203,26 @@ jobs:
         tag_name: release-${{ env.date }}
         name: "Release ${{ env.date }}"
         body: |
-          Automated build of PerceptClassEx (x64 only)
+          Automated build of PerceptClassEx (x64)
           
           Built with:
           - Visual Studio 2022 (v143 toolset)
           - MFC Libraries (14.44)
           - libwebsockets (vcpkg)
           
-          **Files:**
-          - ReClassEx64.exe - 64-bit executable
-          - TestPlugin64.dll - 64-bit plugin (if build succeeded)
+          ## Installation:
+          1. Download `PerceptClassEx-x64-Complete.zip`
+          2. Extract maintaining folder structure
+          3. Run ReClassEx64.exe
+          4. Plugin will be available in File -> Plugins
+          
+          ## Files:
+          - ReClassEx64.exe - Main executable
+          - plugins/TestPlugin.rc-plugin64 - WebSocket plugin
         draft: false
         prerelease: false
-        files: ./release/*
+        files: ./release/*.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
