@@ -24,51 +24,69 @@ jobs:
 
     - name: Setup vcpkg
       uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgGitCommitId: '01f602195983451bc83e72f4214af2cbc495aa94'
 
-    - name: Install libwebsockets with binary caching
+    - name: Install libwebsockets
       run: |
-        $env:VCPKG_BINARY_SOURCES = "clear;x-gha,readwrite"
-        vcpkg install libwebsockets:x64-windows-static --clean-after-build
-        vcpkg install libwebsockets:x86-windows-static --clean-after-build
+        vcpkg install libwebsockets:x64-windows-static --recurse
         vcpkg integrate install
       shell: pwsh
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      continue-on-error: false
 
-    - name: Build x64 Release
+    - name: Verify vcpkg installation
       run: |
-        msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\" /m
+        Write-Host "Checking vcpkg installation..."
+        Get-ChildItem "${{ github.workspace }}\vcpkg\installed\x64-windows-static\include" -Recurse -Filter "libwebsockets.h" -ErrorAction SilentlyContinue
+        Write-Host "`nChecking lib directory..."
+        Get-ChildItem "${{ github.workspace }}\vcpkg\installed\x64-windows-static\lib" -Filter "*.lib" | Select-Object Name
       shell: pwsh
 
-    - name: Build Win32 Release
+    - name: Build x64 Release (Main executable only)
       run: |
-        msbuild ReClass.sln /p:Configuration=Release /p:Platform=Win32 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x86-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\" /m
+        msbuild ReClass\ReClassEx.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\" /m /v:minimal
+      shell: pwsh
+
+    - name: Build x64 Release Plugin
+      run: |
+        msbuild TestPlugin\TestPlugin\TestPlugin.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\" /m /v:detailed
+      shell: pwsh
+      continue-on-error: true
+
+    - name: Check build outputs
+      run: |
+        Write-Host "Checking BIN directory..."
+        if (Test-Path "BIN") {
+          Get-ChildItem -Path BIN -Recurse | Select-Object FullName, Length
+        } else {
+          Write-Host "BIN directory not found!"
+        }
       shell: pwsh
 
     - name: Prepare Artifacts
       run: |
         New-Item -ItemType Directory -Force -Path artifacts
+        
         if (Test-Path "BIN\nothingtoseehere64.exe") { 
-          Copy-Item "BIN\nothingtoseehere64.exe" "artifacts\ReClassEx64.exe" 
+          Copy-Item "BIN\nothingtoseehere64.exe" "artifacts\ReClassEx64.exe"
+          Write-Host "✓ Copied ReClassEx64.exe"
+        } else {
+          Write-Host "✗ nothingtoseehere64.exe not found"
         }
-        if (Test-Path "BIN\nothingtoseehere.exe") { 
-          Copy-Item "BIN\nothingtoseehere.exe" "artifacts\ReClassEx.exe" 
-        }
+        
         if (Test-Path "BIN\plugins\TestPlugin64.dll") { 
-          Copy-Item "BIN\plugins\TestPlugin64.dll" "artifacts\" 
+          Copy-Item "BIN\plugins\TestPlugin64.dll" "artifacts\"
+          Write-Host "✓ Copied TestPlugin64.dll"
+        } else {
+          Write-Host "✗ TestPlugin64.dll not found"
         }
-        if (Test-Path "BIN\plugins\TestPlugin.dll") { 
-          Copy-Item "BIN\plugins\TestPlugin.dll" "artifacts\" 
-        }
+        
+        Write-Host "`nArtifacts prepared:"
         Get-ChildItem -Path artifacts
       shell: pwsh
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: PerceptClassEx-Binaries
+        name: PerceptClassEx-Binaries-x64
         path: artifacts\*
         if-no-files-found: warn
 
@@ -81,7 +99,7 @@ jobs:
     - name: Download Artifacts
       uses: actions/download-artifact@v4
       with:
-        name: PerceptClassEx-Binaries
+        name: PerceptClassEx-Binaries-x64
         path: ./release
 
     - name: Get current date
@@ -94,7 +112,7 @@ jobs:
         tag_name: release-${{ env.date }}
         name: "Release ${{ env.date }}"
         body: |
-          Automated build of PerceptClassEx
+          Automated build of PerceptClassEx (x64 only)
           
           Built with:
           - Visual Studio 2022 (v143 toolset)
@@ -103,9 +121,7 @@ jobs:
           
           **Files:**
           - ReClassEx64.exe - 64-bit executable
-          - ReClassEx.exe - 32-bit executable
-          - TestPlugin64.dll - 64-bit plugin (if built)
-          - TestPlugin.dll - 32-bit plugin (if built)
+          - TestPlugin64.dll - 64-bit plugin (if build succeeded)
         draft: false
         prerelease: false
         files: ./release/*
