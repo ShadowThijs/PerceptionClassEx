@@ -89,29 +89,47 @@ jobs:
       run: |
         New-Item -ItemType Directory -Force -Path artifacts
         
+        $mainExeBuilt = $false
+        $pluginBuilt = $false
+        
+        # Copy main executable
         if (Test-Path "BIN\nothingtoseehere64.exe") { 
           Copy-Item "BIN\nothingtoseehere64.exe" "artifacts\ReClassEx64.exe"
           Write-Host "✓ Copied ReClassEx64.exe"
+          $mainExeBuilt = $true
         } else {
-          Write-Host "✗ nothingtoseehere64.exe not found"
+          Write-Host "✗ Main executable not found!"
+          exit 1
         }
         
-        if (Test-Path "BIN\plugins\TestPlugin64.dll") { 
-          Copy-Item "BIN\plugins\TestPlugin64.dll" "artifacts\"
-          Write-Host "✓ Copied TestPlugin64.dll"
-        } elseif (Test-Path "bin\plugins\TestPlugin64.dll") {
-          Copy-Item "bin\plugins\TestPlugin64.dll" "artifacts\"
-          Write-Host "✓ Copied TestPlugin64.dll (from bin\plugins)"
-        } else {
-          Write-Host "✗ TestPlugin64.dll not found"
+        # Copy plugin - check multiple possible names
+        $pluginFound = $false
+        $pluginPaths = @(
+          @{Source="BIN\plugins\TestPlugin64.dll"; Dest="TestPlugin64.dll"},
+          @{Source="bin\plugins\TestPlugin64.dll"; Dest="TestPlugin64.dll"},
+          @{Source="BIN\plugins\TestPlugin.rc-plugin64"; Dest="TestPlugin64.dll"},
+          @{Source="bin\plugins\TestPlugin.rc-plugin64"; Dest="TestPlugin64.dll"}
+        )
+        
+        foreach ($plugin in $pluginPaths) {
+          if (Test-Path $plugin.Source) {
+            Copy-Item $plugin.Source "artifacts\$($plugin.Dest)"
+            Write-Host "✓ Copied plugin from $($plugin.Source) to $($plugin.Dest)"
+            $pluginBuilt = $true
+            break
+          }
         }
         
-        Write-Host "`nArtifacts prepared:"
-        if (Test-Path "artifacts") {
-          Get-ChildItem -Path artifacts
-        } else {
-          Write-Host "No artifacts!"
+        if (-not $pluginBuilt) {
+          Write-Host "⚠ Warning: Plugin not found in expected locations"
         }
+        
+        Write-Host "`n=== Build Summary ==="
+        Write-Host "Main Executable: $(if($mainExeBuilt){'✓ Success'}else{'✗ Failed'})"
+        Write-Host "Plugin: $(if($pluginBuilt){'✓ Success'}else{'⚠ Not Found'})"
+        
+        Write-Host "`nArtifacts:"
+        Get-ChildItem -Path artifacts | Format-Table Name, Length, LastWriteTime
       shell: pwsh
 
     - name: Upload Artifacts
