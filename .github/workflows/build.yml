@@ -22,17 +22,40 @@ jobs:
       with:
         msbuild-architecture: x64
 
-    - name: Check scintilla structure
+    - name: Setup Developer Command Prompt (for nmake, cl.exe, etc.)
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        # Optional but good defaults for your case (x64 build)
+        arch: amd64          # or x64 — both work
+        # toolset: 14.40     # optional: pin if you need a specific VC version
+    - name: Add nmake to PATH manually
       run: |
-        Write-Host "Checking scintilla directory contents:"
-        if (Test-Path "scintilla") {
-          Get-ChildItem -Path scintilla -Directory | Select-Object Name
-          Write-Host "`nLooking for SciLexer.h:"
-          Get-ChildItem -Path scintilla -Recurse -Filter "SciLexer.h" -ErrorAction SilentlyContinue | Select-Object FullName
-          Write-Host "`nLooking for include directory:"
-          if (Test-Path "scintilla\include") {
-            Get-ChildItem -Path scintilla\include -Filter "*.h" | Select-Object Name
+        # Find latest VC tools version
+        $vcToolsRoot = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC"
+        if (-not (Test-Path $vcToolsRoot)) {
+          $vcToolsRoot = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC"  # fallback to Community edition
+        }
+        $latestVc = Get-ChildItem $vcToolsRoot | Sort-Object Name -Descending | Select-Object -First 1
+        $nmakePath = Join-Path $latestVc.FullName "bin\Hostx64\x64"
+        echo "PATH=$env:PATH;$nmakePath" >> $GITHUB_ENV
+      shell: pwsh
+      continue-on-error: true
+
+    - name: Build Scintilla (if needed)
+      run: |
+        if (Test-Path "scintilla\win32") {
+          Write-Host "Building Scintilla..."
+          Push-Location scintilla\win32
+          if (Test-Path "SciLexer.vcxproj") {
+            msbuild SciLexer.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+          } elseif (Test-Path "scintilla.mak") {
+            nmake -f scintilla.mak
+            # Optional: add parameters if your makefile supports them, e.g.
+            # nmake -f scintilla.mak CFG=release64
+          } else {
+            Write-Host "No build file found for Scintilla"
           }
+          Pop-Location
         }
       shell: pwsh
 
