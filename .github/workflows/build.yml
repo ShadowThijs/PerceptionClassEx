@@ -12,7 +12,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout repository
+    - name: Checkout repo
       uses: actions/checkout@v4
       with:
         submodules: recursive
@@ -22,178 +22,192 @@ jobs:
       with:
         msbuild-architecture: x64
 
-    - name: Setup latest vcpkg
+    - name: Check scintilla structure
       run: |
-        git clone --depth 1 https://github.com/microsoft/vcpkg.git vcpkg
-        .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-      shell: pwsh
-
-    - name: Install dependencies via vcpkg
-      run: |
-        .\vcpkg\vcpkg install libwebsockets:x64-windows-static --clean-after-build
-        # Optional: add more packages here, e.g.
-        # .\vcpkg\vcpkg install zlib:x64-windows-static cpprestsdk:x64-windows-static
-      shell: pwsh
-
-    - name: Set VCPKG_ROOT environment variable
-      run: echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" >> $GITHUB_ENV
-      shell: pwsh
-
-    # Optional: only if your .vcxproj / .sln does NOT already have vcpkg integration
-    # Many older MFC/ReClass-style projects need this line:
-    - name: Integrate vcpkg (classic way - safe fallback)
-      run: .\vcpkg\vcpkg integrate project
-      shell: pwsh
-      continue-on-error: true   # often not needed anymore → ignore failure
-
-    - name: Debug – Show vcpkg triplet path
-      run: |
-        Write-Host "VCPKG_ROOT = $env:VCPKG_ROOT"
-        if (Test-Path "$env:VCPKG_ROOT\installed\x64-windows-static") {
-          Get-ChildItem "$env:VCPKG_ROOT\installed\x64-windows-static" -Directory | Select-Object Name
+        Write-Host "Checking scintilla directory contents:"
+        if (Test-Path "scintilla") {
+          Get-ChildItem -Path scintilla -Directory | Select-Object Name
+          Write-Host "`nLooking for SciLexer.h:"
+          Get-ChildItem -Path scintilla -Recurse -Filter "SciLexer.h" -ErrorAction SilentlyContinue | Select-Object FullName
+          Write-Host "`nLooking for include directory:"
+          if (Test-Path "scintilla\include") {
+            Get-ChildItem -Path scintilla\include -Filter "*.h" | Select-Object Name
+          }
         }
       shell: pwsh
 
-    - name: Build Scintilla (if present)
+    - name: Setup vcpkg (latest)
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+      shell: pwsh
+
+    - name: Install libwebsockets
+      run: |
+        .\vcpkg\vcpkg install libwebsockets:x64-windows-static --recurse
+        .\vcpkg\vcpkg integrate install
+      shell: pwsh
+
+    - name: Build Scintilla (if needed)
       run: |
         if (Test-Path "scintilla\win32") {
           Write-Host "Building Scintilla..."
           Push-Location scintilla\win32
           if (Test-Path "SciLexer.vcxproj") {
-            msbuild SciLexer.vcxproj /p:Configuration=Release /p:Platform=x64 /m /v:minimal
-          }
-          elseif (Test-Path "scintilla.mak") {
+            msbuild SciLexer.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+          } elseif (Test-Path "scintilla.mak") {
             nmake -f scintilla.mak
-          }
-          else {
-            Write-Host "No known Scintilla build file found"
+          } else {
+            Write-Host "No build file found for Scintilla"
           }
           Pop-Location
         }
       shell: pwsh
       continue-on-error: true
 
-    - name: Build main solution (x64 Release)
+    - name: Build x64 Release (Solution)
       run: |
-        msbuild ReClass.sln `
-          /p:Configuration=Release `
-          /p:Platform=x64 `
-          /m `
-          /v:minimal `
-          /p:VcpkgEnabled=true   # keep only if your project explicitly requires it
+        msbuild ReClass.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnabled=true /p:VcpkgConfiguration=Release /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir="${{ github.workspace }}\vcpkg\installed\" /p:VcpkgRoot="${{ github.workspace }}\vcpkg\" /m /v:minimal
       shell: pwsh
 
-    - name: Check build outputs (debug)
+    - name: Check build outputs
       run: |
-        Get-ChildItem -Path BIN -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length
-        Get-ChildItem -Path bin  -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length
-      shell: pwsh
-      continue-on-error: true
-
-    - name: Prepare artifacts
-      run: |
-        New-Item -ItemType Directory -Force -Path artifacts\plugins
-
-        # Main exe – adjust name if different in your project
-        $exePath = "BIN\nothingtoseehere64.exe"
-        if (Test-Path $exePath) {
-          Copy-Item $exePath "artifacts\ReClassEx64.exe" -Force
-          Write-Host "Copied main executable"
+        Write-Host "Checking BIN directory..."
+        if (Test-Path "BIN") {
+          Get-ChildItem -Path BIN -Recurse | Select-Object FullName, Length
         } else {
-          Write-Error "Main executable not found: $exePath"
+          Write-Host "BIN directory not found!"
+        }
+        
+        Write-Host "`nChecking bin\plugins directory..."
+        if (Test-Path "bin\plugins") {
+          Get-ChildItem -Path bin\plugins -Recurse | Select-Object FullName, Length
+        }
+      shell: pwsh
+
+    - name: Prepare Artifacts
+      run: |
+        New-Item -ItemType Directory -Force -Path artifacts
+        New-Item -ItemType Directory -Force -Path artifacts\plugins
+        
+        $mainExeBuilt = $false
+        $pluginsBuilt = $false
+        
+        # Copy main executable
+        if (Test-Path "BIN\nothingtoseehere64.exe") { 
+          Copy-Item "BIN\nothingtoseehere64.exe" "artifacts\ReClassEx64.exe"
+          Write-Host "✓ Copied ReClassEx64.exe"
+          $mainExeBuilt = $true
+        } else {
+          Write-Host "✗ Main executable not found!"
           exit 1
         }
-
-        # Plugin(s) – extend patterns as needed
-        $pluginPatterns = @("BIN\plugins\*.rc-plugin64", "bin\plugins\*.rc-plugin64", "BIN\plugins\*.dll")
-        $pluginCopied = $false
-
-        foreach ($pattern in $pluginPatterns) {
-          Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue | ForEach-Object {
-            $destRoot   = "artifacts\$($_.Name)"
-            $destPlugin = "artifacts\plugins\$($_.Name)"
-            Copy-Item $_.FullName $destRoot   -Force
-            Copy-Item $_.FullName $destPlugin -Force
-            Write-Host "Copied plugin: $($_.Name)"
-            $pluginCopied = $true
+        
+        # Copy all plugins - check multiple possible locations
+        $pluginSources = @("BIN\plugins", "bin\plugins")
+        $pluginsFound = 0
+        
+        foreach ($source in $pluginSources) {
+          if (Test-Path $source) {
+            $plugins = Get-ChildItem -Path $source -File -Recurse
+            foreach ($plugin in $plugins) {
+              $relativePath = $plugin.FullName.Substring((Get-Item $source).FullName.Length + 1)
+              $destPath = Join-Path "artifacts\plugins" $relativePath
+              New-Item -ItemType Directory -Force -Path (Split-Path $destPath)
+              Copy-Item $plugin.FullName $destPath
+              Write-Host "✓ Copied plugin: $relativePath"
+              $pluginsFound++
+            }
+            $pluginsBuilt = $true
           }
         }
-
-        if (-not $pluginCopied) {
-          Write-Warning "No plugins found – continuing anyway"
+        
+        if ($pluginsFound -eq 0) {
+          Write-Host "⚠ Warning: No plugins found in expected locations"
+        } else {
+          Write-Host "✓ Found and copied $pluginsFound plugin files"
         }
-
-        # README
+        
+        # Create README
         @"
-        # PerceptClassEx – Automated Build
-
-        ## Included files
-        - ReClassEx64.exe
-        - plugins\*.rc-plugin64   (WebSocket / perception.cx integration)
-
-        ## Installation
-        1. Extract the zip preserving folder structure
-        2. Keep the `plugins` folder next to the .exe
-        3. Launch ReClassEx64.exe
-        4. Check File → Plugins menu
-
-        Built on: $(Get-Date -Format "yyyy-MM-dd HH:mm")
-        "@ | Out-File -FilePath "artifacts\README.txt" -Encoding utf8
+        # PerceptClassEx - Installation Instructions
+        
+        ## Files Included:
+        - ReClassEx64.exe - Main executable
+        - plugins/ - Folder containing all built plugins (e.g., TestPlugin.rc-plugin64 for WebSocket integration)
+        
+        ## Installation:
+        1. Extract all files maintaining the folder structure
+        2. The 'plugins' folder must be in the same directory as ReClassEx64.exe
+        3. Run ReClassEx64.exe
+        4. Go to File -> Plugins to see available plugins
+        
+        ## Plugin Usage:
+        Plugins provide additional functionality like WebSocket server for IPC with perception.cx scripts.
+        "@ | Out-File -FilePath "artifacts\README.txt" -Encoding UTF8
+        
+        Write-Host "`n=== Build Summary ==="
+        Write-Host "Main Executable: $(if($mainExeBuilt){'✓ Success'}else{'✗ Failed'})"
+        Write-Host "Plugins: $(if($pluginsBuilt){'✓ Success ($pluginsFound files)'}else{'⚠ None Found'})"
+        
+        Write-Host "`nArtifacts structure:"
+        Get-ChildItem -Path artifacts -Recurse | Select-Object FullName, Length
       shell: pwsh
 
-    - name: Create final ZIP
+    - name: Create ZIP package
       run: |
-        Compress-Archive `
-          -Path "artifacts\ReClassEx64.exe", "artifacts\plugins", "artifacts\README.txt" `
-          -DestinationPath "artifacts\PerceptClassEx-x64.zip" `
-          -Force
+        $zipName = "PerceptClassEx-x64-Complete.zip"
+        Compress-Archive -Path "artifacts\ReClassEx64.exe", "artifacts\plugins", "artifacts\README.txt" -DestinationPath "artifacts\$zipName" -Force
+        Write-Host "✓ Created $zipName with proper folder structure"
       shell: pwsh
 
-    - name: Upload artifacts
+    - name: Upload Complete Package
       uses: actions/upload-artifact@v4
       with:
-        name: PerceptClassEx-x64
-        path: artifacts/
+        name: PerceptClassEx-Complete-Package
+        path: artifacts\*.zip
         if-no-files-found: error
 
   release:
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-
+    
     steps:
-    - name: Download artifact
+    - name: Download Artifacts
       uses: actions/download-artifact@v4
       with:
-        name: PerceptClassEx-x64
-        path: release
+        name: PerceptClassEx-Complete-Package
+        path: ./release
 
-    - name: Create timestamp for tag
-      id: timestamp
-      run: echo "tag=build-$(date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
+    - name: Get current date
+      id: date
+      run: echo "date=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ steps.timestamp.outputs.tag }}
-        name: Build ${{ steps.timestamp.outputs.tag }}
+        tag_name: release-${{ env.date }}
+        name: "Release ${{ env.date }}"
         body: |
-          Automated x64 build of **PerceptClassEx**
+          Automated build of PerceptClassEx (x64)
           
-          **Date:** $(date +'%Y-%m-%d %H:%M UTC')
+          Built with:
+          - Visual Studio 2022 (v143 toolset)
+          - MFC Libraries (14.44)
+          - libwebsockets (vcpkg)
           
-          **Included:**
-          - `ReClassEx64.exe`
-          - `plugins/` folder with WebSocket plugin(s)
+          ## Installation:
+          1. Download `PerceptClassEx-x64-Complete.zip`
+          2. Extract maintaining folder structure
+          3. Run ReClassEx64.exe
+          4. Plugins will be available in File -> Plugins
           
-          **Instructions:**
-          1. Download and extract `PerceptClassEx-x64.zip`
-          2. Keep the `plugins` folder beside the executable
-          3. Launch ReClassEx64.exe
-          
-          Built with Visual Studio 2022 + vcpkg (libwebsockets static)
-        files: release/*.zip
+          ## Files:
+          - ReClassEx64.exe - Main executable
+          - plugins/ - All built plugins (e.g., TestPlugin.rc-plugin64)
         draft: false
-        prerelease: true          # ← change to false when stable
+        prerelease: false
+        files: ./release/*.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
